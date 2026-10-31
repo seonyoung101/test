@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>룸 오브 에러 시뮬레이션</title>
+<style>
+  :root{
+    --bg:#f4f7f9; --card:#ffffff; --ink:#1d2b33; --muted:#5d6d77; --line:#d9e2e7;
+    --brand:#1f6f8b; --brand-ink:#ffffff; --danger:#d63031; --ok:#1e8e5a; --warn:#e6a100;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo",sans-serif;line-height:1.5}
+  header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
+    padding:12px 20px;background:var(--card);border-bottom:1px solid var(--line)}
+  header h1{font-size:18px;margin:0}
+  .stats{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .pill{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:14px;font-variant-numeric:tabular-nums}
+  .pill b{font-weight:700}
+  .pill.warn{border-color:var(--danger);color:var(--danger)}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 14px}
+  button:hover{background:#eef3f6}
+  button.primary{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+  button.primary:hover{background:#185a72}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;padding:16px 20px;max-width:1400px;margin:0 auto}
+  @media (max-width:960px){main{grid-template-columns:1fr;padding:12px}}
+  .stage{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;position:relative}
+  svg#scene{width:100%;height:auto;display:block;border-radius:8px;cursor:crosshair;user-select:none}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;align-self:start}
+  .panel h2{font-size:15px;margin:0 0 8px}
+  #list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+  #list li{border:1px dashed var(--line);border-radius:8px;padding:6px 10px;font-size:14px;color:var(--muted)}
+  #list li.done{border:1px solid var(--ok);background:#effaf4;color:var(--ink)}
+  #list li small{display:block;color:var(--muted)}
+  .toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:#1d2b33;color:#fff;
+    padding:8px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:3;max-width:92%}
+  .toast.show{opacity:.95}
+  .overlay{position:fixed;inset:0;background:rgba(20,32,40,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10;overflow:auto}
+  .overlay[hidden]{display:none}
+  .modal{background:var(--card);border-radius:16px;max-width:680px;width:100%;padding:24px;max-height:92vh;overflow:auto}
+  .modal h2{margin:0 0 8px}
+  .opts{display:grid;gap:10px;margin:16px 0;padding:12px;background:var(--bg);border-radius:10px}
+  .opts label{display:flex;gap:8px;align-items:center;font-size:14px}
+  .score{font-size:40px;font-weight:800;color:var(--brand);margin:4px 0}
+  .res-item{border-left:4px solid var(--ok);padding:6px 10px;margin:8px 0;background:#f7fbf9;border-radius:4px;font-size:14px}
+  .res-item.miss{border-left-color:var(--danger);background:#fff5f5}
+  .res-item b{display:block}
+  .tag{display:inline-block;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:0 8px;margin-right:6px;color:var(--muted)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+  ol.q{padding-left:20px;font-size:14px}
+  @keyframes pulse{0%{opacity:1;stroke-width:4}100%{opacity:0;stroke-width:12}}
+  .hintring{animation:pulse 1s ease-out 3;fill:none;stroke:#f5a623}
+  @keyframes ripple{from{r:4;opacity:.9}to{r:26;opacity:0}}
+  .ripple{fill:none;stroke:#d63031;stroke-width:3;animation:ripple .5s ease-out forwards}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏥 룸 오브 에러 · 병실 환자안전 시뮬레이션</h1>
+  <div class="stats">
+    <span class="pill" id="timerPill">⏱ <b id="timer">--:--</b></span>
+    <span class="pill">발견 <b id="foundCount">0</b> / <b id="totalCount">0</b></span>
+    <span class="pill">오답 클릭 <b id="missCount">0</b></span>
+    <button id="hintBtn" disabled>힌트 (<span id="hintLeft">3</span>)</button>
+    <button id="giveUpBtn" disabled>종료하고 결과 보기</button>
+  </div>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="toast" id="toast"></div>
+
+    <svg id="scene" viewBox="0 0 900 520" role="img" aria-label="병실 장면. 환자 안전을 위협하는 오류를 클릭해서 찾으세요.">
+      <!-- 벽 / 바닥 -->
+      <rect width="900" height="330" fill="#e9eff3"/>
+      <rect y="330" width="900" height="190" fill="#cfd8db"/>
+      <rect y="326" width="900" height="8" fill="#b7c3c8"/>
+
+      <!-- 창문 -->
+      <rect x="330" y="40" width="190" height="120" fill="#c8e6f5" stroke="#8da4b0" stroke-width="4"/>
+      <line x1="425" y1="40" x2="425" y2="160" stroke="#8da4b0" stroke-width="3"/>
+      <line x1="330" y1="100" x2="520" y2="100" stroke="#8da4b0" stroke-width="3"/>
+
+      <!-- 화이트보드 -->
+      <rect x="600" y="40" width="220" height="110" rx="4" fill="#fff" stroke="#7b8d97" stroke-width="3"/>
+      <text x="612" y="62" font-size="13" font-weight="700" fill="#234">302호 1번 침상</text>
+      <text x="612" y="84" font-size="13" fill="#234">환자: 김민지 (여/34세)</text>
+      <text x="612" y="106" font-size="13" font-weight="700" fill="#c0392b">알레르기: 페니실린</text>
+      <text x="612" y="128" font-size="13" font-weight="700" fill="#c0392b">낙상 고위험</text>
+
+      <!-- 손소독제 -->
+      <rect x="56" y="168" width="10" height="8" fill="#8a98a0"/>
+      <rect x="44" y="176" width="34" height="62" rx="6" fill="#f7f7f7" stroke="#8a98a0" stroke-width="2"/>
+      <rect x="52" y="184" width="18" height="28" fill="#dfe8ec"/>
+      <text x="61" y="230" font-size="9" text-anchor="middle" fill="#c0392b" font-weight="700">EMPTY</text>
+      <text x="61" y="256" font-size="10" text-anchor="middle" fill="#567">손소독제</text>
+
+      <!-- 활력징후 모니터 -->
+      <rect x="690" y="190" width="130" height="92" rx="8" fill="#20282d"/>
+      <rect x="698" y="198" width="114" height="76" fill="#0b1114"/>
+      <text x="706" y="224" font-size="22" font-weight="700" fill="#ff5252">HR 38</text>
+      <text x="706" y="246" font-size="14" fill="#5ec8ff">SpO₂ 89%</text>
+      <text x="706" y="266" font-size="10" fill="#9aa5ab">ALARM : OFF</text>
+      <line x1="704" y1="263" x2="790" y2="263" stroke="#9aa5ab" stroke-width="1" opacity=".6"/>
+
+      <!-- 손상성 폐기물 용기 (정상 비교용) -->
+      <rect x="840" y="270" width="40" height="52" rx="4" fill="#f5c518" stroke="#b58f00" stroke-width="2"/>
+      <text x="860" y="300" font-size="8" text-anchor="middle" font-weight="700" fill="#5a4600">SHARPS</text>
+
+      <!-- 바닥 물기 -->
+      <ellipse cx="700" cy="452" rx="62" ry="14" fill="#a9d3e6" opacity=".85"/>
+      <ellipse cx="690" cy="448" rx="26" ry="4" fill="#ffffff" opacity=".6"/>
+
+      <!-- 일반 쓰레기통 + 주사바늘 -->
+      <rect x="784" y="408" width="70" height="86" rx="6" fill="#5b6770"/>
+      <rect x="778" y="400" width="82" height="12" rx="4" fill="#47525a"/>
+      <line x1="812" y1="402" x2="832" y2="372" stroke="#aab4ba" stroke-width="5" stroke-linecap="round"/>
+      <line x1="832" y1="372" x2="840" y2="360" stroke="#d9dee1" stroke-width="2" stroke-linecap="round"/>
+      <text x="819" y="456" font-size="10" text-anchor="middle" fill="#dfe6ea">일반 폐기물</text>
+
+      <!-- 침대 그림자 + 다리 + 바퀴 -->
+      <ellipse cx="436" cy="448" rx="220" ry="14" fill="#000" opacity=".08"/>
+      <line x1="285" y1="348" x2="285" y2="417" stroke="#7d8f99" stroke-width="6"/>
+      <line x1="585" y1="348" x2="585" y2="417" stroke="#7d8f99" stroke-width="6"/>
+      <circle cx="285" cy="430" r="13" fill="#3a444a"/>
+      <circle cx="585" cy="430" r="13" fill="#3a444a"/>
+      <rect x="297" y="432" width="12" height="6" rx="2" fill="#d63031"/>   <!-- 잠금(빨강) -->
+      <rect x="597" y="420" width="12" height="6" rx="2" fill="#2ecc71"/>   <!-- 해제(초록) -->
+
+      <!-- 침대 프레임 -->
+      <rect x="250" y="235" width="12" height="125" rx="3" fill="#8a9ba5"/>
+      <rect x="602" y="262" width="10" height="98" rx="3" fill="#8a9ba5"/>
+      <rect x="262" y="334" width="340" height="14" fill="#8a9ba5"/>
+      <rect x="262" y="300" width="340" height="34" rx="8" fill="#ffffff" stroke="#c5d1d7" stroke-width="2"/>
+
+      <!-- 환자 -->
+      <rect x="270" y="288" width="64" height="24" rx="11" fill="#fdfdfd" stroke="#c5d1d7"/>
+      <circle cx="304" cy="282" r="20" fill="#f3c9a5"/>
+      <path d="M284 280 q20 -26 40 0 q-20 -8 -40 0z" fill="#3b2a22"/>
+      <rect x="336" y="286" width="262" height="36" rx="14" fill="#7fb3d5"/>
+      <rect x="392" y="300" width="84" height="13" rx="6" fill="#f3c9a5"/>
+
+      <!-- 손목밴드 -->
+      <rect x="432" y="296" width="36" height="20" rx="3" fill="#fff" stroke="#c0392b" stroke-width="1.5"/>
+      <text x="450" y="309" font-size="9" text-anchor="middle" fill="#222">이서연</text>
+
+      <!-- 수액 폴대 + 수액 백 -->
+      <line x1="215" y1="140" x2="215" y2="450" stroke="#9aa8b0" stroke-width="5"/>
+      <line x1="195" y1="450" x2="235" y2="450" stroke="#9aa8b0" stroke-width="5"/>
+      <line x1="200" y1="140" x2="232" y2="140" stroke="#9aa8b0" stroke-width="5"/>
+      <rect x="200" y="148" width="32" height="54" rx="9" fill="#dff3ff" stroke="#5aa6c9" stroke-width="2"/>
+      <text x="216" y="172" font-size="7" text-anchor="middle" fill="#123" font-weight="700">Ampicillin</text>
+      <text x="216" y="184" font-size="7" text-anchor="middle" fill="#123">2g / 100mL</text>
+
+      <!-- 수액줄 (바닥으로 늘어짐) -->
+      <path d="M216 202 C 196 400, 330 520, 410 478 C 440 462, 428 340, 428 314" fill="none" stroke="#7fc1de" stroke-width="3"/>
+
+      <!-- 침상 난간: 위로 올린 난간(머리쪽) / 내려간 난간(발쪽) -->
+      <rect x="272" y="262" width="118" height="8" rx="4" fill="#9aa8b0" stroke="#6f8089"/>
+      <line x1="290" y1="270" x2="290" y2="300" stroke="#6f8089" stroke-width="4"/>
+      <line x1="372" y1="270" x2="372" y2="300" stroke="#6f8089" stroke-width="4"/>
+      <rect x="486" y="352" width="110" height="8" rx="4" fill="#9aa8b0" stroke="#6f8089"/>
+      <line x1="500" y1="348" x2="500" y2="352" stroke="#6f8089" stroke-width="4"/>
+      <line x1="582" y1="348" x2="582" y2="352" stroke="#6f8089" stroke-width="4"/>
+
+      <!-- 호출벨 (바닥에 떨어짐) -->
+      <path d="M520 352 C 520 400, 524 440, 534 462" fill="none" stroke="#444" stroke-width="2"/>
+      <rect x="523" y="459" width="24" height="14" rx="4" fill="#e8743b"/>
+      <text x="535" y="469" font-size="7" text-anchor="middle" fill="#fff" font-weight="700">CALL</text>
+
+      <!-- 오버베드 테이블 + 약 -->
+      <rect x="60" y="310" width="150" height="10" rx="3" fill="#b89a74"/>
+      <line x1="80" y1="320" x2="80" y2="432" stroke="#8d7a5c" stroke-width="6"/>
+      <line x1="190" y1="320" x2="190" y2="432" stroke="#8d7a5c" stroke-width="6"/>
+      <line x1="66" y1="436" x2="204" y2="436" stroke="#8d7a5c" stroke-width="6"/>
+      <path d="M100 294 h18 l-2 16 h-14z" fill="#ffffff" stroke="#9aa" stroke-width="1.5"/>
+      <circle cx="105" cy="298" r="2.5" fill="#e74c3c"/>
+      <circle cx="111" cy="300" r="2.5" fill="#3498db"/>
+      <circle cx="108" cy="303" r="2.5" fill="#f1c40f"/>
+      <rect x="136" y="288" width="14" height="22" rx="3" fill="#cfe9f7" stroke="#7aa" stroke-width="1.5"/>
+
+      <!-- ===== 클릭 영역 (투명) ===== -->
+      <g id="hits" fill="transparent" stroke="none" pointer-events="all">
+        <rect data-err="tube"      x="270" y="436" width="165" height="75"/>
+        <rect data-err="sanitizer" x="32"  y="160" width="62"  height="105"/>
+        <rect data-err="monitor"   x="684" y="184" width="142" height="104"/>
+        <rect data-err="allergy"   x="192" y="142" width="48"  height="66"/>
+        <rect data-err="pills"     x="92"  y="282" width="64"  height="34"/>
+        <rect data-err="band"      x="426" y="290" width="48"  height="32"/>
+        <rect data-err="rail"      x="478" y="340" width="126" height="26"/>
+        <rect data-err="wheel"     x="565" y="405" width="42"  height="50"/>
+        <rect data-err="bell"      x="514" y="452" width="42"  height="28"/>
+        <rect data-err="wet"       x="632" y="430" width="136" height="44"/>
+        <rect data-err="needle"    x="772" y="352" width="92"  height="62"/>
+      </g>
+
+      <g id="markers" pointer-events="none"></g>
+    </svg>
+  </section>
+
+  <aside class="panel">
+    <h2>찾은 오류</h2>
+    <ul id="list"></ul>
+    <p style="font-size:13px;color:var(--muted);margin:12px 0 0">
+      병실 그림에서 환자 안전을 위협하는 부분을 클릭하세요.
+    </p>
+  </aside>
+</main>
+
+<!-- 시작 화면 -->
+<div class="overlay" id="startOverlay">
+  <div class="modal">
+    <h2>룸 오브 에러</h2>
+    <p>
+      <b>상황</b> · 당신은 야간 근무 간호사입니다. 302호 1번 침상 환자 <b>김민지(34세)</b>는
+      수술 후 1일째이며, 보드에는 <b>페니실린 알레르기</b>와 <b>낙상 고위험</b>이 표시되어 있습니다.
+      라운딩을 시작하며 병실을 둘러보세요.
+    </p>
+    <p>제한 시간 안에 <b>환자 안전을 위협하는 오류</b>를 모두 찾아 클릭하세요. 오답 클릭과 힌트 사용은 점수에서 차감됩니다.</p>
+    <div class="opts">
+      <label><input type="radio" name="mode" value="timed" checked> 시간제한 모드</label>
+      <label>제한 시간
+        <select id="timeSel">
+          <option value="180">3분</option>
+          <option value="300" selected>5분</option>
+          <option value="480">8분</option>
+        </select>
+      </label>
+      <label><input type="radio" name="mode" value="free"> 연습 모드 (시간제한 없음)</label>
+    </div>
+    <div class="row"><button class="primary" id="startBtn">시작하기</button></div>
+    <p style="font-size:12px;color:var(--muted);margin-top:16px">
+      교육·연습용 시뮬레이션입니다. 오류 목록은 index.html 상단의 ERRORS 배열에서 수정할 수 있습니다.
+    </p>
+  </div>
+</div>
+
+<!-- 결과 화면 -->
+<div class="overlay" id="endOverlay" hidden>
+  <div class="modal">
+    <h2 id="endTitle">결과</h2>
+    <div class="score" id="endScore"></div>
+    <div id="endSummary" style="font-size:14px;color:var(--muted)"></div>
+    <div id="endList"></div>
+    <h3 style="margin-top:20px">디브리핑 질문</h3>
+    <ol class="q" id="debrief"></ol>
+    <div class="row">
+      <button class="primary" id="retryBtn">다시 하기</button>
+      <button id="closeBtn">장면 다시 보기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   오류 데이터 — 새 오류를 추가하려면
+   1) 여기에 항목 추가 (id 는 고유하게)
+   2) SVG 의 #hits 안에 <rect data-err="같은id" x y width height/> 추가
+   ============================================================ */
+const ERRORS = [
+  { id:'band', cat:'환자 확인', title:'손목밴드 이름이 병상 정보와 다름',
+    why:'밴드는 "이서연", 병상 보드는 "김민지"입니다. 환자 오인은 투약·검사·시술 오류로 이어집니다. 최소 2가지 식별자(이름+등록번호/생년월일)로 확인하고 밴드를 즉시 재발급해야 합니다.' },
+  { id:'allergy', cat:'투약', title:'페니실린 알레르기 환자에게 암피실린 수액',
+    why:'암피실린은 페니실린계 항생제입니다. 아나필락시스 위험이 있으므로 투약 전 알레르기 확인이 필수이며, 발견 즉시 주입을 중단하고 의사에게 보고합니다.' },
+  { id:'rail', cat:'낙상 예방', title:'낙상 고위험 환자인데 침상 난간이 내려가 있음',
+    why:'낙상 고위험 환자는 침상 난간을 올리고 침상 높이를 낮게 유지해야 합니다. (신체 억제와 구분하여 기관 지침을 따릅니다.)' },
+  { id:'wheel', cat:'환경 안전', title:'침상 바퀴 잠금이 해제됨 (초록)',
+    why:'바퀴가 풀려 있으면 환자가 이동·이송 중 침대가 밀려 낙상할 수 있습니다. 빨간색 잠금 상태를 확인합니다.' },
+  { id:'tube', cat:'환경 안전', title:'수액줄이 바닥에 늘어져 있음',
+    why:'걸려 넘어짐(낙상), 줄 오염, 카테터 이탈 위험이 있습니다. 줄 길이를 정리하고 바닥에 닿지 않게 고정합니다.' },
+  { id:'wet', cat:'환경 안전', title:'바닥에 물기',
+    why:'미끄러짐 사고의 원인입니다. 즉시 닦고, 마르기 전에는 "미끄럼 주의" 표지를 둡니다.' },
+  { id:'monitor', cat:'모니터링', title:'HR 38·SpO₂ 89%인데 알람이 꺼져 있음',
+    why:'서맥과 저산소 상태를 놓칠 수 있습니다. 즉시 환자를 사정하고 알람을 켠 뒤 SBAR로 의사에게 보고합니다.' },
+  { id:'pills', cat:'투약', title:'복용 여부가 확인되지 않은 약이 탁자에 방치됨',
+    why:'투약은 환자가 복용하는 것을 직접 확인해야 합니다. 방치된 약은 오복용·누락·타인 복용의 위험이 있습니다.' },
+  { id:'bell', cat:'의사소통', title:'호출벨이 바닥에 떨어져 환자 손이 닿지 않음',
+    why:'낙상 고위험 환자가 도움을 요청하지 못하면 혼자 움직이다 사고가 납니다. 호출벨은 항상 손이 닿는 곳에 고정합니다.' },
+  { id:'sanitizer', cat:'감염 관리', title:'손소독제가 비어 있음',
+    why:'WHO 손위생 5계기를 지키려면 접근 가능한 곳에 소독제가 채워져 있어야 합니다. 즉시 보충을 요청합니다.' },
+  { id:'needle', cat:'감염·직업 안전', title:'주사바늘이 일반 폐기물 통에 버려져 있음',
+    why:'바늘 찔림 사고와 혈액매개 감염 위험이 있습니다. 사용한 바늘은 재덮개 없이 손상성 폐기물 용기(노란색)에 바로 버립니다.' }
+];
+
+const DEBRIEF = [
+  '발견한 오류 중 환자에게 가장 즉각적인 위해를 줄 수 있는 것은 무엇이며, 그렇게 판단한 근거는 무엇인가요?',
+  '이런 오류가 실제 병동에서 생기는 시스템적 원인(인력, 절차, 물품, 의사소통)은 무엇일까요?',
+  '알레르기 약물 투약을 발견했다고 가정하고 SBAR(상황-배경-사정-제안)로 의사에게 보고해 보세요.'
+];
+
+const HINTS_MAX = 3;
+const $ = id => document.getElementById(id);
+const svg = $('scene'), markers = $('markers');
+
+let state = { running:false, found:new Set(), misses:0, hints:0, mode:'timed', total:300, left:300, timer:null };
+
+/* ---------- 초기화 ---------- */
+$('totalCount').textContent = ERRORS.length;
+DEBRIEF.forEach(q => { const li = document.createElement('li'); li.textContent = q; $('debrief').appendChild(li); });
+
+function renderList(){
+  const ul = $('list'); ul.innerHTML = '';
+  ERRORS.forEach(e => {
+    const li = document.createElement('li');
+    if (state.found.has(e.id)){
+      li.className = 'done';
+      li.innerHTML = '<b>✔ ' + e.title + '</b><small>' + e.cat + '</small>';
+    } else {
+      li.textContent = '？ 아직 못 찾음';
+    }
+    ul.appendChild(li);
+  });
+  $('foundCount').textContent = state.found.size;
+  $('missCount').textContent = state.misses;
+  $('hintLeft').textContent = HINTS_MAX - state.hints;
+}
+
+function fmt(s){ s = Math.max(0, s); return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0'); }
+
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function svgPoint(evt){
+  const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function ns(tag, attrs){
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+/* ---------- 게임 흐름 ---------- */
+function start(){
+  state.mode = document.querySelector('input[name=mode]:checked').value;
+  state.total = parseInt($('timeSel').value, 10);
+  state.left = state.total;
+  state.found = new Set(); state.misses = 0; state.hints = 0; state.running = true;
+  markers.innerHTML = '';
+  $('startOverlay').hidden = true; $('endOverlay').hidden = true;
+  $('hintBtn').disabled = false; $('giveUpBtn').disabled = false;
+  $('timerPill').classList.remove('warn');
+  clearInterval(state.timer);
+  if (state.mode === 'timed'){
+    $('timer').textContent = fmt(state.left);
+    state.timer = setInterval(() => {
+      state.left--; $('timer').textContent = fmt(state.left);
+      if (state.left <= 30) $('timerPill').classList.add('warn');
+      if (state.left <= 0) end('timeout');
+    }, 1000);
+  } else {
+    $('timer').textContent = '연습';
+  }
+  renderList();
+}
+
+function onFound(id, el){
+  if (state.found.has(id)) return;
+  state.found.add(id);
+  const e = ERRORS.find(x => x.id === id);
+  const b = el.getBBox();
+  const r = Math.max(b.width, b.height) / 2 + 6;
+  markers.appendChild(ns('ellipse', {
+    cx: b.x + b.width/2, cy: b.y + b.height/2,
+    rx: Math.max(b.width/2 + 6, 18), ry: Math.max(b.height/2 + 6, 18),
+    fill:'rgba(46,204,113,.12)', stroke:'#1e8e5a', 'stroke-width':3
+  }));
+  toast('✔ ' + e.title);
+  renderList();
+  if (state.found.size === ERRORS.length) end('complete');
+}
+
+function onMiss(p){
+  state.misses++;
+  const c = ns('circle', { cx:p.x, cy:p.y, r:4, class:'ripple' });
+  markers.appendChild(c); setTimeout(() => c.remove(), 600);
+  renderList();
+}
+
+function hint(){
+  if (!state.running || state.hints >= HINTS_MAX) return;
+  const left = ERRORS.filter(e => !state.found.has(e.id));
+  if (!left.length) return;
+  const e = left[Math.floor(Math.random() * left.length)];
+  const el = svg.querySelector('[data-err="' + e.id + '"]');
+  const b = el.getBBox();
+  const ring = ns('ellipse', {
+    cx:b.x + b.width/2, cy:b.y + b.height/2,
+    rx:Math.max(b.width/2 + 14, 30), ry:Math.max(b.height/2 + 14, 30), class:'hintring'
+  });
+  markers.appendChild(ring); setTimeout(() => ring.remove(), 3200);
+  state.hints++; renderList();
+  toast('힌트: 이 부근에 오류가 있습니다 (점수 -3)');
+}
+
+function calcScore(){
+  const base = Math.round(state.found.size / ERRORS.length * 100);
+  return Math.max(0, base - state.misses * 2 - state.hints * 3);
+}
+
+function end(reason){
+  if (!state.running) return;
+  state.running = false; clearInterval(state.timer);
+  $('hintBtn').disabled = true; $('giveUpBtn').disabled = true;
+
+  const score = calcScore();
+  const title = reason === 'complete' ? '🎉 모든 오류를 찾았습니다!' :
+                reason === 'timeout'  ? '⏰ 시간 종료' : '결과';
+  $('endTitle').textContent = title;
+  $('endScore').textContent = score + '점';
+
+  const used = state.mode === 'timed' ? ' · 소요 시간 ' + fmt(state.total - state.left) : '';
+  $('endSummary').textContent =
+    '발견 ' + state.found.size + '/' + ERRORS.length +
+    ' · 오답 클릭 ' + state.misses + ' · 힌트 ' + state.hints + used;
+
+  // 못 찾은 오류는 장면에 점선으로 표시
+  ERRORS.filter(e => !state.found.has(e.id)).forEach(e => {
+    const b = svg.querySelector('[data-err="' + e.id + '"]').getBBox();
+    markers.appendChild(ns('ellipse', {
+      cx:b.x + b.width/2, cy:b.y + b.height/2,
+      rx:Math.max(b.width/2 + 6, 18), ry:Math.max(b.height/2 + 6, 18),
+      fill:'rgba(214,48,49,.1)', stroke:'#d63031', 'stroke-width':3, 'stroke-dasharray':'6 4'
+    }));
+  });
+
+  const box = $('endList'); box.innerHTML = '';
+  const ordered = [...ERRORS].sort((a, b) => state.found.has(b.id) - state.found.has(a.id));
+  ordered.forEach(e => {
+    const ok = state.found.has(e.id);
+    const d = document.createElement('div');
+    d.className = 'res-item' + (ok ? '' : ' miss');
+    d.innerHTML = '<b>' + (ok ? '✔ ' : '✘ 놓침 · ') + e.title + '</b>' +
+                  '<span class="tag">' + e.cat + '</span>' + e.why;
+    box.appendChild(d);
+  });
+
+  try {
+    const best = Number(localStorage.getItem('roe_best') || 0);
+    if (score > best){ localStorage.setItem('roe_best', score); $('endSummary').textContent += ' · 🏆 최고 기록 갱신'; }
+  } catch(_) {}
+
+  $('endOverlay').hidden = false;
+}
+
+/* ---------- 이벤트 ---------- */
+svg.addEventListener('click', evt => {
+  if (!state.running) return;
+  const t = evt.target.closest('[data-err]');
+  if (t) onFound(t.dataset.err, t); else onMiss(svgPoint(evt));
+});
+$('startBtn').addEventListener('click', start);
+$('retryBtn').addEventListener('click', () => { $('endOverlay').hidden = true; $('startOverlay').hidden = false; });
+$('closeBtn').addEventListener('click', () => { $('endOverlay').hidden = true; });
+$('hintBtn').addEventListener('click', hint);
+$('giveUpBtn').addEventListener('click', () => end('giveup'));
+
+renderList();
+</script>
+</body>
+</html>
